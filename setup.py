@@ -22,7 +22,7 @@ setup(
     name='pydicom_ext',
     version=__version__,
     description='Get back the pydicom series read function which has been detached from pydicom repo',
-    url='https://github.com/pydicom_ext/pydicom_ext',
+    url='https://github.com/shinaji/pydicom_ext',
     author='shinaji',
     author_email='shina.synergy@gmail.com',
     license='MIT',
