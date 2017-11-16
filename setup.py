@@ -9,9 +9,6 @@ CLASSIFIERS = [
     "Intended Audience :: Science/Research",
     "Development Status :: 5 - Production/Stable",
     "Programming Language :: Python",
-    "Programming Language :: Python :: 2.7",
-    "Programming Language :: Python :: 3.4",
-    "Programming Language :: Python :: 3.5",
     "Programming Language :: Python :: 3.6",
     "Operating System :: OS Independent",
     "Topic :: Scientific/Engineering :: Medical Science Apps.",
@@ -21,7 +18,7 @@ CLASSIFIERS = [
 setup(
     name='pydicom_ext',
     version=__version__,
-    description='Get back the pydicom series read function which has been detached from pydicom repo',
+    description='Additional functions for dicom data manipulation',
     url='https://github.com/shinaji/pydicom_ext',
     author='shinaji',
     author_email='shina.synergy@gmail.com',
