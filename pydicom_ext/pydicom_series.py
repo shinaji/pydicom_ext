@@ -230,7 +230,7 @@ def _getPixelDataFromDataset(ds):
     el = dict.__getitem__(ds, pixelDataTag)
 
     # Get data
-    data = ds.pixel_array
+    data = np.array(ds.pixel_array)
 
     # Remove data (mark as deferred)
     dict.__setitem__(ds, pixelDataTag, el)
