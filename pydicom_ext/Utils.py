@@ -90,8 +90,8 @@ def convert_npy_to_dicom(fname, npy_array,
     dcm.HighBit = 16
     dcm.BitsStored = 16
     dcm.BitsAllocated = 16
-    dcm.SmallestImagePixelValue = uint16_img.min()
-    dcm.LargestImagePixelValue = uint16_img.max()
+    # dcm.SmallestImagePixelValue = uint16_img.min()
+    # dcm.LargestImagePixelValue = uint16_img.max()
     dcm.Columns = uint16_img.shape[2]
     dcm.Rows = uint16_img.shape[1]
     dcm.NumberOfFrames = uint16_img.shape[0]
@@ -128,7 +128,7 @@ def convert_npy_to_dicom(fname, npy_array,
     dcm.InstitutionName = 'DicomConversionUtils'
 
     dcm.save_as(fname)
-    uint16_img.tofile('test.raw')
+    # uint16_img.tofile('test.raw')
     return dcm
 
 
