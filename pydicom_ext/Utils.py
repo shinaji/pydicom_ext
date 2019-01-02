@@ -201,7 +201,9 @@ def convert_npy_to_dicom(npy_array, fname=None,
         dcm.ImagePositionPatient = [0, 0, 0]
         if fname is not None:
             dcm.save_as(fname, write_like_original=False)
+        return dcm
     else:
+        dcms = []
         for slice_idx in range(uint16_img.shape[0]):
             dcm.SOPInstanceUID = f'333.333.0.0.0.{now}.{slice_idx:06d}'
             dcm.PixelData = uint16_img[slice_idx].tostring()
@@ -228,6 +230,7 @@ def convert_npy_to_dicom(npy_array, fname=None,
                 dcm.ImagePositionPatient = [0, 0, slice_idx * spacing_between_slices]
                 dcm.SliceLocation = slice_idx * spacing_between_slices
 
+            dcms.append(dcm)
             if fname is not None:
                 f = copy.copy(fname)
                 if ".dcm" in f:
@@ -235,7 +238,7 @@ def convert_npy_to_dicom(npy_array, fname=None,
                 else:
                     f += f"_{slice_idx:06d}.dcm"
                 dcm.save_as(f, write_like_original=False)
-    return dcm
+        return dcms
 
 
 def convert_dicom_to_npy(dcm: pydicom_series.DicomSeries) -> \
