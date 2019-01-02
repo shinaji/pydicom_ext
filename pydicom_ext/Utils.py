@@ -92,6 +92,7 @@ def convert_npy_to_dicom(npy_array, fname=None,
     :param slice_thickness: slice thickness
     :param spacing_between_slices: spacing between slices
     :param pixel_spacing: pixel spacing
+    :param single_file_mode: if False, slice by slice dicom files are generated
     :return:  dcm
     """
     uint16_img = np.array(npy_array).astype(float)
