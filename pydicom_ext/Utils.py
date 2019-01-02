@@ -14,31 +14,90 @@
 
 import numpy as np
 from matplotlib import pyplot as plt
+from pydicom_ext import __version__ as pydicom_ext_version
 from pydicom_ext import pydicom_series
 from pydicom.dataset import Dataset, FileDataset
+from pydicom.sequence import Sequence
+from pydicom.multival import MultiValue
+from pydicom.tag import BaseTag
+from pydicom.compat import in_py2
+if not in_py2:
+    from pydicom.valuerep import PersonName3 as PersonName
+else:
+    from pydicom.valuerep import PersonNameUnicode as PersonName
 from datetime import datetime
 import os
 import random
 from typing import Tuple
 import traceback
 import json
+from json import JSONEncoder
+import copy
 
-def convert_npy_to_dicom(fname, npy_array,
+
+class _JsonEncoder(JSONEncoder):
+        def default(self, obj):
+            if type(obj) is MultiValue:
+                return list(obj)
+            else:
+                return json.JSONEncoder.default(self, obj)
+
+
+def convert_sequence_to_json(seq: Sequence):
+    """
+    convert Sequence to json
+    """
+    return [convert_dataset_to_json(elem) if type(elem) is Dataset else
+            convert_sequence_to_json(elem) for elem in seq]
+
+
+def convert_dataset_to_json(dcm: Dataset):
+    """convert Dataset to json format"""
+
+    data = {}
+    for key in dcm.keys():
+        if type(dcm[key].value) is Sequence:
+            v = convert_sequence_to_json(dcm[key].value)
+        elif type(dcm[key]) is Sequence:
+            v = convert_sequence_to_json(dcm[key])
+        elif type(dcm[key].value) is PersonName:
+            v = str(dcm[key].value)
+        elif dcm[key].name == "Pixel Data":
+            v = np.array(dcm.pixel_array).tolist()
+        else:
+            v = dcm[key].value
+        data.update({
+            int(key): {
+                "name": dcm[key].name,
+                "value": v,
+                "VM": dcm[key].VM,
+                "VR": dcm[key].VR,
+                # "type": str(type(dcm[key]))
+            }
+        })
+
+    return data
+
+
+def convert_npy_to_dicom(npy_array, fname=None,
                          slice_thickness=None,
-                         pixel_spacing=None):
+                         pixel_spacing=None,
+                         spacing_between_slices=None,
+                         single_file_mode=True
+                         ):
     """
     convert npy array to dicom
-    :param fname: file name
     :param npy_array: npy array
+    :param fname: file name
     :param slice_thickness: slice thickness
+    :param spacing_between_slices: spacing between slices
     :param pixel_spacing: pixel spacing
     :return:  dcm
     """
-
-    uint16_img = np.array(npy_array)
+    uint16_img = np.array(npy_array).astype(float)
     uint16_img = (
-        (uint16_img - uint16_img.min()) /
-        (uint16_img.max() - uint16_img.min()) * (2**16 - 1)
+            (uint16_img - uint16_img.min()) /
+            (uint16_img.max() - uint16_img.min()) * (2 ** 16 - 1)
     ).astype(np.uint16)
     dim = len(uint16_img.shape)
     if dim == 1:
@@ -47,23 +106,27 @@ def convert_npy_to_dicom(fname, npy_array,
         uint16_img = uint16_img[np.newaxis, :, :]
     elif dim > 3:
         raise Exception('{}D array is not supported.'.format(dim))
-    x_min = npy_array.min()
-    x_max = npy_array.max()
+    x_min = float(npy_array.min())
+    x_max = float(npy_array.max())
     x_max_min = x_max - x_min
-    t_max = (2**16) - 1
+    t_max = (2 ** 16) - 1
     slope = x_max_min / t_max
     intercept = x_min
+    now = datetime.now().timestamp()
 
     file_meta = Dataset()
     file_meta.MediaStorageSOPClassUID = '1.2.840.100008.5.1.4.1.1.20'
-    file_meta.MediaStorageSOPInstanceUID = \
-        '333.333.0.0.0.333.333333333.{}'.format(
-            datetime.now().timestamp())
+
+    file_meta.MediaStorageSOPInstanceUID = f'333.333.0.0.0.333.333333333.{now}'
     file_meta.ImplementationClassUID = '0.0.0.0'
+    file_meta.FileMetaInformationGroupLength = 140
     dcm = FileDataset(fname, {}, file_meta=file_meta, preamble=b'\0' * 128)
 
     dcm.Modality = 'OT'
-    dcm.ImageType = ['ORIGINAL', 'PRIMARY']
+    if single_file_mode:
+        dcm.ImageType = ["DERIVED", "PRIMARY", "RECON TOMO", "EMISSION"]
+    else:
+        dcm.ImageType = ["DERIVED", "SECONDARY"]
 
     dcm.ContentDate = datetime.now().strftime('%Y%m%d')
     dcm.ContentTime = datetime.now().strftime('%H%M%S')
@@ -85,50 +148,92 @@ def convert_npy_to_dicom(fname, npy_array,
     dcm.StudyID = os.path.basename(fname)
     dcm.SeriesDescription = os.path.basename(fname)
     dcm.SamplesPerPixel = 1
-    dcm.PhotometricInterpretation = 'MONOCHROME1'
+    dcm.PhotometricInterpretation = 'MONOCHROME2'
     dcm.PixelRepresentation = 0  # unsigned 0, signed 1
     dcm.HighBit = 16
     dcm.BitsStored = 16
     dcm.BitsAllocated = 16
-    # dcm.SmallestImagePixelValue = uint16_img.min()
-    # dcm.LargestImagePixelValue = uint16_img.max()
     dcm.Columns = uint16_img.shape[2]
     dcm.Rows = uint16_img.shape[1]
-    dcm.NumberOfFrames = uint16_img.shape[0]
+    if single_file_mode:
+        dcm.NumberOfFrames = uint16_img.shape[0]
+        dcm.ImagesInAquisition = uint16_img.shape[0]
+        dcm.SliceVector = (np.arange(uint16_img.shape[0]) + 1).tolist()
+        dcm.FrameIncrementPointer = [(0x0054, 0x0080)]
+    else:
+        dcm.NumberOfTimeSlices = 1
+        dcm.FrameReferenceTime = 0.
+    dcm.ImageOrientationPatient = [1., 0., 0., 0., -1., 0.]
+    dcm.SeriesNumber = 0
     dcm.NumberOfSlices = uint16_img.shape[0]
-    dcm.ImagesInAquisition = uint16_img.shape[0]
     dcm.RescaleIntercept = intercept
     dcm.RescaleSlope = slope
-    dcm.SliceVector = (np.arange(uint16_img.shape[0]) + 1).tolist()
-    dcm.FrameIncrementPointer = [(0x0054, 0x0080)]
-
-    dcm.PixelData = uint16_img.tostring()
+    dcm.Units = "NONE"
+    dcm.DecayCorrection = "NONE"
+    dcm.InstanceCreatorUID = '333.333.0.0.0'
+    dcm.SOPClassUID = '1.2.840.10008.5.1.4.1.1.20'
     dcm.SliceThickness = 1 if slice_thickness is None else slice_thickness
+    if spacing_between_slices is None:
+        dcm.SpacingBetweenSlices = 1 if slice_thickness is None else slice_thickness
+    else:
+        dcm.SpacingBetweenSlices = spacing_between_slices
     ps = 1 if pixel_spacing is None else pixel_spacing
     if isinstance(ps, list) or isinstance(ps, np.ndarray):
         dcm.PixelSpacing = [ps[0], ps[1]]
     else:
         dcm.PixelSpacing = [ps, ps]
-    dcm.InstanceCreatorUID = '333.333.0.0.0'
-    dcm.SOPClassUID = '1.2.840.10008.5.1.4.1.1.20'
-    dcm.SOPInstanceUID = '333.333.0.0.0.{}'.format(
-        datetime.now().timestamp())
-    dcm.StudyInstanceUID = '333.333.0.0.0.{}'.format(datetime.now().timestamp())
-    dcm.SeriesInstanceUID = '333.333.0.0.0.{}.3333'.format(
-        datetime.now().timestamp())
-    dcm.FrameOfReferenceUID = dcm.StudyInstanceUID
-    dcm.SeriesNumber = 0
-    dcm.InstanceNumber = 0
-    dcm.BodyPartExamined = 'UNKNOWN'
-    dcm.Manufacturer = 'DicomConversionUtils'
-    dcm.DeviceSerialNumber = ''
-    dcm.AcquisitionTerminationCondition = 'MANU'
-    dcm.SoftwareVersions = 'UNKNOWN'
-    dcm.AccessionNumber = '{:13d}'.format(random.randint(0, 1e13))
-    dcm.InstitutionName = 'DicomConversionUtils'
 
-    dcm.save_as(fname)
-    # uint16_img.tofile('test.raw')
+    if single_file_mode:
+        dcm.PixelData = uint16_img.tostring()
+        dcm.StudyInstanceUID = f'333.333.0.0.0.{now}'
+        dcm.SeriesInstanceUID = f'333.333.0.0.0.{now}.3333'
+        dcm.FrameOfReferenceUID = dcm.StudyInstanceUID
+        dcm.SeriesNumber = 0
+        dcm.InstanceNumber = 0
+        dcm.BodyPartExamined = 'UNKNOWN'
+        dcm.Manufacturer = 'DicomConversionUtils'
+        dcm.DeviceSerialNumber = ''
+        dcm.AcquisitionTerminationCondition = 'MANU'
+        dcm.SoftwareVersions = f'{pydicom_ext_version}'
+        dcm.AccessionNumber = '{:13d}'.format(random.randint(0, 1e13))
+        dcm.InstitutionName = 'DicomConversionUtils'
+        dcm.ImagePositionPatient = [0, 0, 0]
+        if fname is not None:
+            dcm.save_as(fname, write_like_original=False)
+    else:
+        for slice_idx in range(uint16_img.shape[0]):
+            dcm.SOPInstanceUID = f'333.333.0.0.0.{now}.{slice_idx:06d}'
+            dcm.PixelData = uint16_img[slice_idx].tostring()
+            dcm.StudyInstanceUID = f'333.333.0.0.0.{now}'
+            dcm.SeriesInstanceUID = f'333.333.0.0.0.{now}.3333'
+            dcm.FrameOfReferenceUID = dcm.StudyInstanceUID
+            dcm.InstanceNumber = slice_idx
+            dcm.BodyPartExamined = 'UNKNOWN'
+            dcm.Manufacturer = 'DicomConversionUtils'
+            dcm.DeviceSerialNumber = ''
+            dcm.AcquisitionTerminationCondition = 'MANU'
+            dcm.SoftwareVersions = f'{pydicom_ext_version}'
+            dcm.AccessionNumber = '{:13d}'.format(random.randint(0, 1e13))
+            dcm.InstitutionName = 'DicomConversionUtils'
+            dcm.ImageIndex = slice_idx
+            if spacing_between_slices is None:
+                if slice_thickness is None:
+                    dcm.ImagePositionPatient = [0, 0, slice_idx]
+                    dcm.SliceLocation = slice_idx
+                else:
+                    dcm.ImagePositionPatient = [0, 0, slice_idx * slice_thickness]
+                    dcm.SliceLocation = slice_idx * slice_thickness
+            else:
+                dcm.ImagePositionPatient = [0, 0, slice_idx * spacing_between_slices]
+                dcm.SliceLocation = slice_idx * spacing_between_slices
+
+            if fname is not None:
+                f = copy.copy(fname)
+                if ".dcm" in f:
+                    f = f.replace(".dcm", f"_{slice_idx:06d}.dcm")
+                else:
+                    f += f"_{slice_idx:06d}.dcm"
+                dcm.save_as(f, write_like_original=False)
     return dcm
 
 

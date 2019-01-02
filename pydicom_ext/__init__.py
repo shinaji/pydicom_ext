@@ -5,5 +5,5 @@
     This software is released under the MIT License.
     http://opensource.org/licenses/mit-license.php
 """
-__version__ = "0.5.2"
+__version__ = "0.6.0"
 from . import pydicom_series
